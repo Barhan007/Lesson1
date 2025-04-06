@@ -1,84 +1,127 @@
 from abc import ABC, abstractmethod
 from typing import List, Dict, Optional
+import bcrypt
+from datetime import datetime
+from enum import Enum
 
-# Базовый класс для пользователя
+class Role(Enum):
+    USER = "user"
+    ADMIN = "admin"
+
+class Account:
+    """Отдельная сущность для управления балансом"""
+    def __init__(self, user_id: int, initial_balance: float = 0.0):
+        self.user_id = user_id
+        self.balance = initial_balance
+        self.created_at = datetime.now()
+    
+    def deposit(self, amount: float):
+        """Пополнение баланса"""
+        if amount <= 0:
+            raise ValueError("Сумма пополнения должна быть положительной")
+        self.balance += amount
+    
+    def withdraw(self, amount: float):
+        """Списание средств"""
+        if amount <= 0:
+            raise ValueError("Сумма списания должна быть положительной")
+        if self.balance < amount:
+            raise ValueError("Недостаточно средств на балансе")
+        self.balance -= amount
+    
+    def __str__(self):
+        return f"Account(user_id={self.user_id}, balance={self.balance})"
+
 class User:
-    def __init__(self, user_id: int, username: str, password: str, balance: float = 0.0, role: str = "user"):
+    """Сущность пользователя без ответственности за баланс"""
+    def __init__(self, user_id: int, username: str, password: str, role: Role = Role.USER):
         self.user_id = user_id
         self.username = username
-        self.password = password
-        self.balance = balance
+        self._hashed_password = self._hash_password(password)
         self.role = role
-
-    def add_balance(self, amount: float):
-        """Пополнение баланса."""
-        if amount > 0:
-            self.balance += amount
-        else:
-            raise ValueError("Сумма пополнения должна быть положительной")
-
-    def deduct_balance(self, amount: float):
-        """Списание баланса."""
-        if self.balance >= amount:
-            self.balance -= amount
-        else:
-            raise ValueError("Недостаточно средств на балансе")
-
+        self.created_at = datetime.now()
+    
+    @staticmethod
+    def _hash_password(password: str) -> bytes:
+        """Хеширование пароля с помощью bcrypt"""
+        return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
+    
+    def verify_password(self, password: str) -> bool:
+        """Проверка пароля"""
+        return bcrypt.checkpw(password.encode('utf-8'), self._hashed_password)
+    
     def __str__(self):
-        return f"User(id={self.user_id}, username={self.username}, balance={self.balance}, role={self.role})"
+        return f"User(id={self.user_id}, username={self.username}, role={self.role.value})"
 
-# Класс для администратора (наследование от User)
 class Admin(User):
+    """Администратор системы"""
     def __init__(self, user_id: int, username: str, password: str):
-        super().__init__(user_id, username, password, role="admin")
+        super().__init__(user_id, username, password, Role.ADMIN)
 
-    def add_user_balance(self, user: User, amount: float):
-        """Пополнение баланса другого пользователя."""
-        user.add_balance(amount)
-
-# Абстрактный класс для ML модели
 class MLModel(ABC):
+    """Абстрактная модель машинного обучения"""
     @abstractmethod
     def predict(self, data: List[Dict]) -> List[Dict]:
-        """Метод для выполнения предсказания."""
         pass
 
-# Пример конкретной ML модели
 class ExampleMLModel(MLModel):
+    """Пример реализации ML модели"""
     def predict(self, data: List[Dict]) -> List[Dict]:
-        """Пример реализации предсказания."""
-        # Здесь должна быть логика предсказания
-        return [{"prediction": 1} for _ in data]
+        return [{"prediction": i % 2, "confidence": 0.95} for i, _ in enumerate(data)]
 
-# Класс для задачи ML
+class PredictionHistory:
+    """Сущность для хранения истории предсказаний"""
+    def __init__(self):
+        self.history = []
+    
+    def add_prediction(self, task_id: int, user_id: int, input_data: List[Dict], result: List[Dict]):
+        """Добавление записи о предсказании"""
+        self.history.append({
+            "task_id": task_id,
+            "user_id": user_id,
+            "input_data": input_data,
+            "result": result,
+            "timestamp": datetime.now()
+        })
+    
+    def get_user_history(self, user_id: int) -> List[Dict]:
+        """Получение истории пользователя"""
+        return [record for record in self.history if record["user_id"] == user_id]
+
 class MLTask:
-    def __init__(self, task_id: int, user: User, data: List[Dict], model: MLModel):
+    """Задача машинного обучения"""
+    TASK_COST = 1.0  # Стоимость выполнения задачи
+    
+    def __init__(self, task_id: int, user: User, account: Account, data: List[Dict], model: MLModel):
         self.task_id = task_id
         self.user = user
+        self.account = account
         self.data = data
         self.model = model
+    
+    def execute(self) -> List[Dict]:
+        """Выполнение задачи с проверкой баланса"""
+        if self.account.balance < self.TASK_COST:
+            raise ValueError("Недостаточно средств для выполнения задачи")
+        
+        self.account.withdraw(self.TASK_COST)
+        return self.model.predict(self.data)
 
-    def execute(self):
-        """Выполнение задачи."""
-        if self.user.balance >= 1.0:  # Условная стоимость задачи
-            self.user.deduct_balance(1.0)
-            return self.model.predict(self.data)
-        else:
-            raise ValueError("Недостаточно средств на балансе")
-
-# Класс для истории транзакций
 class TransactionHistory:
+    """История финансовых операций"""
     def __init__(self):
         self.transactions = []
-
-    def add_transaction(self, user: User, amount: float, description: str):
-        """Добавление транзакции в историю."""
+    
+    def add_transaction(self, user_id: int, account_id: int, amount: float, description: str):
+        """Добавление транзакции"""
         self.transactions.append({
-            "user_id": user.user_id,
+            "user_id": user_id,
+            "account_id": account_id,
             "amount": amount,
-            "description": description
+            "description": description,
+            "timestamp": datetime.now()
         })
-
-    def get_user_transactions(self, user: User) -> List[Dict]:
-        """Получение транзакций пользователя."""
-        return [t for t in self.transactions if t["user_id"] == user.user_id]
+    
+    def get_user_transactions(self, user_id: int) -> List[Dict]:
+        """Получение транзакций пользователя"""
+        return [t for t in self.transactions if t["user_id"] == user_id]
