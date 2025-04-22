@@ -125,3 +125,4 @@ class TransactionHistory:
     def get_user_transactions(self, user_id: int) -> List[Dict]:
         """Получение транзакций пользователя"""
         return [t for t in self.transactions if t["user_id"] == user_id]
+    #   этим коментарием я проаеряю работу с GitHub
